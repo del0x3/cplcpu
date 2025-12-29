@@ -1,0 +1,162 @@
+name: Wazuh Filebeat Speed Benchmark
+
+on:
+  push:
+    branches: [claude/create-cloud-env-6UrxS, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      log_size_gb:
+        description: 'Log size to generate (GB)'
+        required: false
+        default: '0.5'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start Wazuh Stack
+        working-directory: ./wazuh-lab
+        run: |
+          echo "🚀 Starting Wazuh 4.12.0 Stack..."
+          docker compose up -d wazuh-indexer wazuh-manager filebeat
+
+          echo "⏳ Waiting for services to be ready..."
+          sleep 60
+
+          echo "📊 Checking services status:"
+          docker compose ps
+
+      - name: Wait for Wazuh Indexer
+        working-directory: ./wazuh-lab
+        run: |
+          echo "⏳ Waiting for Wazuh Indexer to be ready..."
+          for i in {1..30}; do
+            if curl -s -k http://localhost:9200/_cluster/health | grep -q '"status"'; then
+              echo "✅ Wazuh Indexer is ready!"
+              curl -s -k http://localhost:9200/_cluster/health | jq .
+              break
+            fi
+            echo "  Attempt $i/30..."
+            sleep 10
+          done
+
+      - name: Generate Test Logs
+        working-directory: ./wazuh-lab
+        run: |
+          LOG_SIZE="${{ github.event.inputs.log_size_gb || '0.5' }}"
+          echo "📝 Generating ${LOG_SIZE} GB of test logs..."
+
+          # Build and run log generator
+          docker compose build agent-log-generator
+
+          TARGET_SIZE_GB=$LOG_SIZE docker compose run --rm \
+            -e TARGET_SIZE_GB=$LOG_SIZE \
+            -e LOG_TYPE=security \
+            -e BATCH_SIZE=50000 \
+            agent-log-generator
+
+          echo "📁 Generated logs:"
+          ls -lah ./agent-logs/ || true
+          du -sh ./agent-logs/ || true
+
+      - name: Start Wazuh Agent
+        working-directory: ./wazuh-lab
+        run: |
+          echo "🔗 Starting Wazuh Agent..."
+          docker compose up -d wazuh-agent
+          sleep 30
+
+          echo "📊 Agent status:"
+          docker compose logs wazuh-agent --tail=20
+
+      - name: Measure Filebeat Speed
+        id: benchmark
+        working-directory: ./wazuh-lab
+        run: |
+          echo "📈 Measuring Filebeat indexing speed..."
+          echo ""
+
+          # Make script executable
+          chmod +x ./scripts/measure_filebeat_speed.sh
+
+          # Run measurement for 120 seconds
+          ./scripts/measure_filebeat_speed.sh -d 120 -i 5 -o /tmp/benchmark.json || true
+
+          echo ""
+          echo "=============================================="
+          echo "       FILEBEAT SPEED BENCHMARK RESULTS       "
+          echo "=============================================="
+
+          if [ -f /tmp/benchmark.json ]; then
+            cat /tmp/benchmark.json | jq .
+          fi
+
+      - name: Final Metrics Summary
+        working-directory: ./wazuh-lab
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║           WAZUH FILEBEAT BENCHMARK SUMMARY                   ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+
+          # Get indexer stats
+          STATS=$(curl -s -k http://localhost:9200/wazuh-alerts-*/_stats 2>/dev/null || echo "{}")
+
+          DOC_COUNT=$(echo $STATS | jq -r '._all.primaries.docs.count // 0')
+          STORE_SIZE=$(echo $STATS | jq -r '._all.primaries.store.size_in_bytes // 0')
+          STORE_MB=$(echo "scale=2; $STORE_SIZE / 1048576" | bc)
+          STORE_GB=$(echo "scale=4; $STORE_SIZE / 1073741824" | bc)
+
+          echo "║  Total Documents Indexed:  $DOC_COUNT"
+          echo "║  Total Store Size:         $STORE_MB MB ($STORE_GB GB)"
+          echo "║"
+
+          # Get Filebeat metrics
+          FB_STATS=$(curl -s http://localhost:5066/stats 2>/dev/null || echo "{}")
+          EVENTS_TOTAL=$(echo $FB_STATS | jq -r '.filebeat.events.done // 0')
+
+          echo "║  Filebeat Events Processed: $EVENTS_TOTAL"
+          echo "║"
+
+          if [ -f /tmp/benchmark.json ]; then
+            AVG_RATE=$(cat /tmp/benchmark.json | jq -r '.events_per_sec.average // "N/A"')
+            AVG_THROUGHPUT_MB=$(cat /tmp/benchmark.json | jq -r '.throughput_mb_per_sec.average // "N/A"')
+            AVG_THROUGHPUT_GB=$(cat /tmp/benchmark.json | jq -r '.throughput_gb_per_sec.average // "N/A"')
+            AVG_LATENCY=$(cat /tmp/benchmark.json | jq -r '.latency_ms.average // "N/A"')
+
+            echo "║  ─────────────────────────────────────────"
+            echo "║  PERFORMANCE METRICS:"
+            echo "║  ─────────────────────────────────────────"
+            echo "║  Average Indexing Rate:    $AVG_RATE events/sec"
+            echo "║  Average Throughput:       $AVG_THROUGHPUT_MB MB/sec"
+            echo "║  Average Throughput:       $AVG_THROUGHPUT_GB GB/sec"
+            echo "║  Average Latency:          $AVG_LATENCY ms/event"
+          fi
+
+          echo "╚══════════════════════════════════════════════════════════════╝"
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            /tmp/benchmark.json
+            ./wazuh-lab/agent-logs/*.log
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        working-directory: ./wazuh-lab
+        run: |
+          docker compose down -v || true
