@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir requests
+
+COPY filebeat_benchmark.py /app/
+
+RUN mkdir -p /app/results
+
+CMD ["python", "-u", "filebeat_benchmark.py"]

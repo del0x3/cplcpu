@@ -1,0 +1,28 @@
+# Wazuh Indexer Internal Users Configuration
+# This is for lab environment - security is disabled
+
+_meta:
+  type: "internalusers"
+  config_version: 2
+
+# Admin user
+admin:
+  hash: "$2y$12$K/SpwjtB.wOHJ/Nc6GVRDuc1h0rM1DfvziFRNPtk27P.c4yDr9njO"
+  reserved: true
+  backend_roles:
+    - "admin"
+  description: "Admin user"
+
+# Kibana server user
+kibanaserver:
+  hash: "$2y$12$4hGEIzITMGOqXOjmE8Y0d.ql3H8S.9xqvvkJzLGCUK7lLM3mY8K6C"
+  reserved: true
+  description: "Kibana server user"
+
+# Logstash user
+logstash:
+  hash: "$2y$12$u1ShR4l4uBS3Uv59Pa2y5.1uQuZBrZtmNfqB3iM/.jL0XoV9sghS2"
+  reserved: false
+  backend_roles:
+    - "logstash"
+  description: "Logstash user"

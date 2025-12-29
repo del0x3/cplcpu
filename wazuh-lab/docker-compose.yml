@@ -1,11 +1,17 @@
 version: '3.8'
 
+# Wazuh 4.12.0 All-in-One Lab with Filebeat Speed Measurement
+# Full stack: Manager, Indexer, Dashboard + Filebeat + Monitoring
+
 services:
-  # Wazuh Indexer (OpenSearch-based)
+  # =============================================================================
+  # WAZUH INDEXER (OpenSearch-based) - v4.12.0
+  # =============================================================================
   wazuh-indexer:
-    image: wazuh/wazuh-indexer:4.9.0
+    image: wazuh/wazuh-indexer:4.12.0
     container_name: wazuh-indexer
     hostname: wazuh-indexer
+    restart: unless-stopped
     environment:
       - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
       - "bootstrap.memory_lock=true"
@@ -22,31 +28,116 @@ services:
     volumes:
       - wazuh-indexer-data:/var/lib/wazuh-indexer
       - ./config/wazuh-indexer/opensearch.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
+      - ./config/wazuh-indexer/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml:ro
     ports:
       - "9200:9200"
       - "9300:9300"
     networks:
       - wazuh-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # =============================================================================
+  # WAZUH MANAGER - v4.12.0
+  # =============================================================================
+  wazuh-manager:
+    image: wazuh/wazuh-manager:4.12.0
+    container_name: wazuh-manager
+    hostname: wazuh-manager
+    restart: unless-stopped
+    environment:
+      - INDEXER_URL=http://wazuh-indexer:9200
+      - FILEBEAT_SSL_VERIFICATION_MODE=none
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr3tP4ssw0rd*
+    volumes:
+      - wazuh-manager-api:/var/ossec/api/configuration
+      - wazuh-manager-etc:/var/ossec/etc
+      - wazuh-manager-logs:/var/ossec/logs
+      - wazuh-manager-queue:/var/ossec/queue
+      - wazuh-manager-var:/var/ossec/var
+      - wazuh-manager-integrations:/var/ossec/integrations
+      - wazuh-manager-active-response:/var/ossec/active-response/bin
+      - wazuh-manager-agentless:/var/ossec/agentless
+      - wazuh-manager-wodles:/var/ossec/wodles
+      - ./config/wazuh-manager/wazuh_cluster.conf:/wazuh-config-mount/etc/ossec.conf:ro
+    ports:
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+      - "55000:55000"
+    depends_on:
+      wazuh-indexer:
+        condition: service_healthy
+    networks:
+      - wazuh-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -k https://localhost:55000/security/user/authenticate -u wazuh-wui:MyS3cr3tP4ssw0rd* || exit 0"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 120s
 
-  # Filebeat - ships logs to Wazuh Indexer
+  # =============================================================================
+  # WAZUH DASHBOARD - v4.12.0
+  # =============================================================================
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:4.12.0
+    container_name: wazuh-dashboard
+    hostname: wazuh-dashboard
+    restart: unless-stopped
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=admin
+      - WAZUH_API_URL=https://wazuh-manager
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr3tP4ssw0rd*
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+    volumes:
+      - ./config/wazuh-dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml:ro
+      - ./config/wazuh-dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml:ro
+      - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
+      - wazuh-dashboard-custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
+    ports:
+      - "5601:5601"
+    depends_on:
+      wazuh-indexer:
+        condition: service_healthy
+      wazuh-manager:
+        condition: service_started
+    networks:
+      - wazuh-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q 'available' || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # =============================================================================
+  # FILEBEAT - Log shipper with speed measurement
+  # =============================================================================
   filebeat:
     image: docker.elastic.co/beats/filebeat:7.17.18
     container_name: filebeat
     hostname: filebeat
     user: root
+    restart: unless-stopped
     volumes:
       - ./config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ./logs:/var/log/app:ro
       - filebeat-data:/usr/share/filebeat/data
+      - filebeat-logs:/usr/share/filebeat/logs
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - ELASTICSEARCH_HOSTS=http://wazuh-indexer:9200
-      - KIBANA_HOST=http://wazuh-dashboard:5601
+    ports:
+      - "5066:5066"  # Filebeat HTTP endpoint for metrics
     depends_on:
       wazuh-indexer:
         condition: service_healthy
@@ -54,24 +145,57 @@ services:
       - wazuh-net
     command: filebeat -e -strict.perms=false
 
-  # Log Generator - creates sample logs
+  # =============================================================================
+  # LOG GENERATOR - High-volume log generation for speed testing
+  # =============================================================================
   log-generator:
     build:
       context: ./scripts
       dockerfile: Dockerfile.log-generator
     container_name: log-generator
     hostname: log-generator
+    environment:
+      - LOG_RATE=100  # logs per second
+      - BURST_MODE=false
     volumes:
       - ./logs:/var/log/app
     networks:
       - wazuh-net
     restart: unless-stopped
 
-  # Metrics Exporter - Prometheus metrics for Wazuh Indexer
+  # =============================================================================
+  # FILEBEAT SPEED BENCHMARK - Speed measurement tool
+  # =============================================================================
+  filebeat-benchmark:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.benchmark
+    container_name: filebeat-benchmark
+    hostname: filebeat-benchmark
+    environment:
+      - FILEBEAT_HOST=filebeat:5066
+      - INDEXER_HOST=wazuh-indexer:9200
+      - BENCHMARK_DURATION=300  # 5 minutes
+      - SAMPLE_INTERVAL=5  # sample every 5 seconds
+    volumes:
+      - ./benchmark-results:/app/results
+      - ./logs:/var/log/app
+    depends_on:
+      - filebeat
+      - wazuh-indexer
+    networks:
+      - wazuh-net
+    profiles:
+      - benchmark
+
+  # =============================================================================
+  # METRICS EXPORTER - Prometheus metrics for Wazuh Indexer
+  # =============================================================================
   indexer-exporter:
     image: prometheuscommunity/elasticsearch-exporter:v1.7.0
     container_name: indexer-exporter
     hostname: indexer-exporter
+    restart: unless-stopped
     command:
       - '--es.uri=http://wazuh-indexer:9200'
       - '--es.all'
@@ -80,6 +204,7 @@ services:
       - '--es.indices_mappings'
       - '--es.shards'
       - '--es.snapshots'
+      - '--es.cluster_settings'
     ports:
       - "9114:9114"
     depends_on:
@@ -88,11 +213,14 @@ services:
     networks:
       - wazuh-net
 
-  # Prometheus - metrics collection
+  # =============================================================================
+  # PROMETHEUS - Metrics collection
+  # =============================================================================
   prometheus:
     image: prom/prometheus:v2.48.0
     container_name: prometheus
     hostname: prometheus
+    restart: unless-stopped
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -103,14 +231,18 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=7d'
     networks:
       - wazuh-net
 
-  # Grafana - visualization and dashboards
+  # =============================================================================
+  # GRAFANA - Visualization and dashboards
+  # =============================================================================
   grafana:
     image: grafana/grafana:10.2.2
     container_name: grafana
     hostname: grafana
+    restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -131,7 +263,28 @@ networks:
     driver: bridge
 
 volumes:
+  # Wazuh Indexer
   wazuh-indexer-data:
+
+  # Wazuh Manager
+  wazuh-manager-api:
+  wazuh-manager-etc:
+  wazuh-manager-logs:
+  wazuh-manager-queue:
+  wazuh-manager-var:
+  wazuh-manager-integrations:
+  wazuh-manager-active-response:
+  wazuh-manager-agentless:
+  wazuh-manager-wodles:
+
+  # Wazuh Dashboard
+  wazuh-dashboard-config:
+  wazuh-dashboard-custom:
+
+  # Filebeat
   filebeat-data:
+  filebeat-logs:
+
+  # Monitoring
   prometheus-data:
   grafana-data:

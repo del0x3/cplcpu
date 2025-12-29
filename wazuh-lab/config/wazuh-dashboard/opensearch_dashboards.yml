@@ -1,0 +1,28 @@
+# Wazuh Dashboard (OpenSearch Dashboards) Configuration - v4.12.0
+# Lab environment - security disabled for testing
+
+server.host: 0.0.0.0
+server.port: 5601
+server.name: wazuh-dashboard
+
+# OpenSearch connection (security disabled)
+opensearch.hosts: ["http://wazuh-indexer:9200"]
+
+# Disable SSL for lab environment
+opensearch.ssl.verificationMode: none
+
+# Dashboard settings
+opensearch.requestHeadersWhitelist: ["securitytenant","Authorization"]
+opensearch_security.multitenancy.enabled: false
+opensearch_security.readonly_mode.roles: ["kibana_read_only"]
+server.ssl.enabled: false
+
+# Logging
+logging.dest: stdout
+logging.verbose: false
+
+# UI Settings
+uiSettings.overrides.defaultRoute: /app/wazuh
+
+# Saved objects encryption key (generate a new one for production)
+opensearch_security.cookie.secure: false

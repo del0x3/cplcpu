@@ -1,0 +1,10 @@
+# Wazuh App Configuration - v4.12.0
+# Configuration for Wazuh Dashboard plugin
+
+hosts:
+  - default:
+      url: https://wazuh-manager
+      port: 55000
+      username: wazuh-wui
+      password: MyS3cr3tP4ssw0rd*
+      run_as: false
