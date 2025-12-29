@@ -26,8 +26,10 @@ A complete Docker-based Wazuh 4.12.0 stack with Filebeat log shipping and compre
 | Wazuh Indexer | 9200, 9300 | OpenSearch-based indexer |
 | Wazuh Manager | 1514, 1515, 514/udp, 55000 | Core security analysis engine |
 | Wazuh Dashboard | 5601 | Web UI for security monitoring |
+| Wazuh Agent | - | Agent connected to manager with 5GB log generator |
 | Filebeat | 5066 | Ships logs (DEFAULT configuration) |
 | Log Generator | - | High-volume sample log generation |
+| Agent Log Generator | - | Generates 5GB of logs for agent testing |
 | Prometheus | 9090 | Metrics collection |
 | Grafana | 3000 | Dashboards and visualization |
 
@@ -246,6 +248,40 @@ http.port: 5066
 | **Latency** | Time per document (ms) | `index_time_ms / index_total` |
 | **Throughput** | Data rate (KB/sec) | `rate(store_size_bytes[1m])` |
 | **Event Lag** | Pending events in queue | Filebeat queue depth |
+
+## 5GB Agent Log Testing
+
+Generate 5GB of realistic security logs for Wazuh agent stress testing:
+
+```bash
+# Start the agent with 5GB log generator
+docker-compose --profile generate-5gb up -d wazuh-agent agent-log-generator
+
+# Monitor log generation progress
+docker-compose logs -f agent-log-generator
+
+# Check generated log sizes
+du -h ./agent-logs/
+
+# View generated auth.log sample
+head -20 ./agent-logs/auth.log
+```
+
+### Agent Log Generator Options
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| TARGET_SIZE_GB | 5 | Total log size to generate |
+| LOG_TYPE | security | Log type: security, wazuh, syslog |
+| BATCH_SIZE | 10000 | Lines per batch write |
+
+```bash
+# Generate 10GB of logs
+TARGET_SIZE_GB=10 docker-compose --profile generate-5gb up agent-log-generator
+
+# Generate Wazuh-style JSON alerts
+LOG_TYPE=wazuh docker-compose --profile generate-5gb up agent-log-generator
+```
 
 ## Adjusting Log Generation Rate
 

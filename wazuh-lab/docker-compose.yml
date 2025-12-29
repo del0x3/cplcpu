@@ -146,6 +146,48 @@ services:
     command: filebeat -e -strict.perms=false
 
   # =============================================================================
+  # WAZUH AGENT - v4.12.0 with 5GB log generator
+  # =============================================================================
+  wazuh-agent:
+    image: wazuh/wazuh-agent:4.12.0
+    container_name: wazuh-agent
+    hostname: wazuh-agent
+    restart: unless-stopped
+    environment:
+      - WAZUH_MANAGER=wazuh-manager
+      - WAZUH_AGENT_GROUP=default
+      - WAZUH_AGENT_NAME=test-agent-5gb
+    volumes:
+      - wazuh-agent-var:/var/ossec/var
+      - wazuh-agent-etc:/var/ossec/etc
+      - wazuh-agent-logs:/var/ossec/logs
+      - ./agent-logs:/var/log/test-logs
+    depends_on:
+      - wazuh-manager
+    networks:
+      - wazuh-net
+
+  # =============================================================================
+  # AGENT LOG GENERATOR - Generates 5GB of logs on the agent
+  # =============================================================================
+  agent-log-generator:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.agent-logs
+    container_name: agent-log-generator
+    hostname: agent-log-generator
+    environment:
+      - TARGET_SIZE_GB=5
+      - LOG_TYPE=security
+      - BATCH_SIZE=10000
+    volumes:
+      - ./agent-logs:/var/log/test-logs
+    networks:
+      - wazuh-net
+    profiles:
+      - generate-5gb
+
+  # =============================================================================
   # LOG GENERATOR - High-volume log generation for speed testing
   # =============================================================================
   log-generator:
@@ -284,6 +326,11 @@ volumes:
   # Filebeat
   filebeat-data:
   filebeat-logs:
+
+  # Wazuh Agent
+  wazuh-agent-var:
+  wazuh-agent-etc:
+  wazuh-agent-logs:
 
   # Monitoring
   prometheus-data:

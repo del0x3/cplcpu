@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir tqdm
+
+# Copy the log generator script
+COPY agent_log_generator.py /app/
+
+# Create log directory
+RUN mkdir -p /var/log/test-logs
+
+# Environment variables with defaults
+ENV TARGET_SIZE_GB=5
+ENV LOG_TYPE=security
+ENV BATCH_SIZE=10000
+ENV LOG_DIR=/var/log/test-logs
+
+CMD ["python", "-u", "agent_log_generator.py"]

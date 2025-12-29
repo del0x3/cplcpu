@@ -92,8 +92,8 @@ echo ""
 echo -e "${GREEN}Starting measurement...${NC}"
 echo -e "Press Ctrl+C to stop early"
 echo ""
-echo -e "${BLUE}Time     | Events/sec | Latency(ms) | Throughput(KB/s) | Total Docs${NC}"
-echo "---------|------------|-------------|------------------|------------"
+echo -e "${BLUE}Time     | Events/sec | Latency(ms) | Throughput(MB/s) | Throughput(GB/s) | Total Docs${NC}"
+echo "---------|------------|-------------|------------------|------------------|------------"
 
 # Measurement loop
 elapsed=0
@@ -122,16 +122,17 @@ while [ $elapsed -lt $DURATION ]; do
             latency_ms="0.00"
         fi
 
-        throughput_kbps=$(echo "scale=2; ($store_diff / 1024) / $time_diff" | bc)
+        throughput_mbps=$(echo "scale=4; ($store_diff / 1048576) / $time_diff" | bc)
+        throughput_gbps=$(echo "scale=6; ($store_diff / 1073741824) / $time_diff" | bc)
 
         # Store samples
         rates+=("$events_per_sec")
         latencies+=("$latency_ms")
-        throughputs+=("$throughput_kbps")
+        throughputs+=("$throughput_mbps")
 
         elapsed=$((current_time - start_time))
-        printf "%4ds    | %10s | %11s | %16s | %10s\n" \
-            "$elapsed" "$events_per_sec" "$latency_ms" "$throughput_kbps" "$current_docs"
+        printf "%4ds    | %10s | %11s | %16s | %16s | %10s\n" \
+            "$elapsed" "$events_per_sec" "$latency_ms" "$throughput_mbps" "$throughput_gbps" "$current_docs"
     fi
 
     prev_docs=$current_docs
@@ -190,8 +191,8 @@ if [ ${#rates[@]} -gt 0 ]; then
     echo -e "  Average:  $avg_latency ms/event"
     echo ""
     echo -e "${GREEN}Data Throughput:${NC}"
-    echo -e "  Average:  $avg_throughput KB/sec"
-    echo -e "  Average:  $(echo "scale=4; $avg_throughput / 1024" | bc) MB/sec"
+    echo -e "  Average:  $avg_throughput MB/sec"
+    echo -e "  Average:  $(echo "scale=6; $avg_throughput / 1024" | bc) GB/sec"
     echo ""
     echo -e "${GREEN}Test Duration:${NC}"
     echo -e "  Total:    $elapsed seconds"
@@ -204,7 +205,7 @@ if [ ${#rates[@]} -gt 0 ]; then
     echo ""
     echo -e "${GREEN}Final State:${NC}"
     echo -e "  Total Documents:  $final_docs"
-    echo -e "  Total Store Size: $(echo "scale=2; $final_store / 1048576" | bc) MB"
+    echo -e "  Total Store Size: $(echo "scale=4; $final_store / 1073741824" | bc) GB ($(echo "scale=2; $final_store / 1048576" | bc) MB)"
 
     # Save to JSON if output file specified
     if [ -n "$OUTPUT_FILE" ]; then
@@ -227,12 +228,16 @@ if [ ${#rates[@]} -gt 0 ]; then
         "latency_ms": {
             "average": $avg_latency
         },
-        "throughput_kb_per_sec": {
+        "throughput_mb_per_sec": {
             "average": $avg_throughput
+        },
+        "throughput_gb_per_sec": {
+            "average": $(echo "scale=6; $avg_throughput / 1024" | bc)
         },
         "final_state": {
             "total_documents": $final_docs,
-            "total_store_bytes": $final_store
+            "total_store_bytes": $final_store,
+            "total_store_gb": $(echo "scale=4; $final_store / 1073741824" | bc)
         }
     }
 }
