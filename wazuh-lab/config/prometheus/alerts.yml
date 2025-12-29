@@ -1,0 +1,135 @@
+# Prometheus Alerting Rules for Wazuh Lab
+# Monitors Wazuh Indexer read/write metrics and health
+
+groups:
+  - name: wazuh_indexer_alerts
+    interval: 30s
+    rules:
+      # Cluster Health Alerts
+      - alert: WazuhIndexerClusterRed
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Wazuh Indexer cluster is RED"
+          description: "Wazuh Indexer cluster {{ $labels.cluster }} has been in RED status for more than 5 minutes."
+
+      - alert: WazuhIndexerClusterYellow
+        expr: elasticsearch_cluster_health_status{color="yellow"} == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer cluster is YELLOW"
+          description: "Wazuh Indexer cluster {{ $labels.cluster }} has been in YELLOW status for more than 15 minutes."
+
+      # Node Health
+      - alert: WazuhIndexerNodeDown
+        expr: elasticsearch_cluster_health_number_of_nodes < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Wazuh Indexer node is down"
+          description: "No Wazuh Indexer nodes are available."
+
+      # Disk Space Alerts
+      - alert: WazuhIndexerDiskSpaceLow
+        expr: (elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer disk space low"
+          description: "Wazuh Indexer node {{ $labels.name }} has less than 20% disk space available."
+
+      - alert: WazuhIndexerDiskSpaceCritical
+        expr: (elasticsearch_filesystem_data_available_bytes / elasticsearch_filesystem_data_size_bytes) * 100 < 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Wazuh Indexer disk space critical"
+          description: "Wazuh Indexer node {{ $labels.name }} has less than 10% disk space available."
+
+      # Index Write Latency
+      - alert: WazuhIndexerHighWriteLatency
+        expr: rate(elasticsearch_indices_indexing_index_time_seconds_total[5m]) / rate(elasticsearch_indices_indexing_index_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer high write latency"
+          description: "Wazuh Indexer write latency is above 1 second for index operations."
+
+      # Index Read Latency
+      - alert: WazuhIndexerHighReadLatency
+        expr: rate(elasticsearch_indices_search_query_time_seconds[5m]) / rate(elasticsearch_indices_search_query_total[5m]) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer high read/search latency"
+          description: "Wazuh Indexer search query latency is above 2 seconds."
+
+      # Indexing Rate
+      - alert: WazuhIndexerLowIndexingRate
+        expr: rate(elasticsearch_indices_indexing_index_total[5m]) < 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer low indexing rate"
+          description: "Wazuh Indexer indexing rate has dropped below 1 doc/sec for 15 minutes."
+
+      # JVM Heap Usage
+      - alert: WazuhIndexerHeapUsageHigh
+        expr: elasticsearch_jvm_memory_used_bytes{area="heap"} / elasticsearch_jvm_memory_max_bytes{area="heap"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer JVM heap usage high"
+          description: "Wazuh Indexer JVM heap usage is above 90% on node {{ $labels.name }}."
+
+      # Unassigned Shards
+      - alert: WazuhIndexerUnassignedShards
+        expr: elasticsearch_cluster_health_unassigned_shards > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer has unassigned shards"
+          description: "Wazuh Indexer cluster has {{ $value }} unassigned shards."
+
+      # Pending Tasks
+      - alert: WazuhIndexerPendingTasks
+        expr: elasticsearch_cluster_health_number_of_pending_tasks > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wazuh Indexer has pending tasks"
+          description: "Wazuh Indexer cluster has {{ $value }} pending tasks."
+
+  - name: filebeat_alerts
+    interval: 30s
+    rules:
+      - alert: FilebeatNotRunning
+        expr: up{job="filebeat"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Filebeat is not running"
+          description: "Filebeat process is down or unreachable."
+
+      - alert: FilebeatHighErrorRate
+        expr: rate(filebeat_libbeat_output_events{type="failed"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Filebeat high error rate"
+          description: "Filebeat is experiencing high output failure rate."

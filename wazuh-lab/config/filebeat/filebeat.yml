@@ -1,0 +1,179 @@
+# Wazuh - Filebeat configuration file
+# Default configuration for Wazuh Indexer integration
+
+#======================== Filebeat inputs =============================
+
+filebeat.inputs:
+
+# Application logs input
+- type: log
+  id: app-logs
+  enabled: true
+  paths:
+    - /var/log/app/*.log
+    - /var/log/app/**/*.log
+  fields:
+    log_type: application
+    environment: lab
+  fields_under_root: true
+  multiline:
+    pattern: '^\d{4}-\d{2}-\d{2}'
+    negate: true
+    match: after
+
+# Wazuh alerts input (JSON format)
+- type: log
+  id: wazuh-alerts
+  enabled: true
+  paths:
+    - /var/log/app/alerts/*.json
+  json.keys_under_root: true
+  json.add_error_key: true
+  json.message_key: message
+  fields:
+    log_type: wazuh-alerts
+  fields_under_root: true
+
+# Security events input
+- type: log
+  id: security-events
+  enabled: true
+  paths:
+    - /var/log/app/security/*.log
+  fields:
+    log_type: security
+  fields_under_root: true
+
+# System metrics logs
+- type: log
+  id: metrics-logs
+  enabled: true
+  paths:
+    - /var/log/app/metrics/*.log
+  fields:
+    log_type: metrics
+  fields_under_root: true
+
+#======================== Filebeat modules ============================
+
+filebeat.config.modules:
+  path: ${path.config}/modules.d/*.yml
+  reload.enabled: false
+
+#======================== Processors ==================================
+
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - add_cloud_metadata: ~
+  - add_docker_metadata: ~
+  - add_kubernetes_metadata: ~
+
+  # Parse timestamps
+  - timestamp:
+      field: "@timestamp"
+      layouts:
+        - '2006-01-02T15:04:05.000Z'
+        - '2006-01-02T15:04:05Z'
+        - '2006-01-02 15:04:05'
+      test:
+        - '2024-01-15T10:30:00.000Z'
+      ignore_failure: true
+
+  # Add processing metadata
+  - add_fields:
+      target: ''
+      fields:
+        pipeline: filebeat-wazuh
+        indexer_target: wazuh-indexer
+
+  # Drop empty messages
+  - drop_event:
+      when:
+        equals:
+          message: ""
+
+#======================== Template settings ===========================
+
+setup.template.enabled: true
+setup.template.name: "wazuh"
+setup.template.pattern: "wazuh-*"
+setup.template.settings:
+  index.number_of_shards: 1
+  index.number_of_replicas: 0
+  index.refresh_interval: "5s"
+
+setup.template.overwrite: true
+
+# Disable ILM for lab environment
+setup.ilm.enabled: false
+
+#======================== Dashboards ==================================
+
+setup.dashboards.enabled: false
+
+#======================== Output - Wazuh Indexer ======================
+
+output.elasticsearch:
+  # Wazuh Indexer hosts
+  hosts: ["http://wazuh-indexer:9200"]
+
+  # Index naming
+  index: "wazuh-alerts-%{+yyyy.MM.dd}"
+
+  # Bulk settings for performance
+  bulk_max_size: 1000
+  worker: 2
+
+  # Compression
+  compression_level: 3
+
+  # Connection settings
+  timeout: 90
+  max_retries: 3
+
+  # For production, enable SSL:
+  # protocol: https
+  # ssl.enabled: true
+  # ssl.certificate_authorities: ["/etc/filebeat/certs/root-ca.pem"]
+  # ssl.certificate: "/etc/filebeat/certs/filebeat.pem"
+  # ssl.key: "/etc/filebeat/certs/filebeat-key.pem"
+  # username: ${ES_USERNAME}
+  # password: ${ES_PASSWORD}
+
+#======================== Logging =====================================
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /usr/share/filebeat/logs
+  name: filebeat
+  keepfiles: 7
+  permissions: 0640
+
+# Metrics logging
+logging.metrics.enabled: true
+logging.metrics.period: 30s
+
+#======================== Monitoring ==================================
+
+# Enable monitoring
+monitoring.enabled: true
+monitoring.elasticsearch:
+  hosts: ["http://wazuh-indexer:9200"]
+
+#======================== HTTP endpoint ===============================
+
+# Enable HTTP endpoint for health checks
+http.enabled: true
+http.host: 0.0.0.0
+http.port: 5066
+
+#======================== Security ====================================
+
+seccomp:
+  default_action: allow
+  syscalls:
+    - action: allow
+      names:
+        - rseq

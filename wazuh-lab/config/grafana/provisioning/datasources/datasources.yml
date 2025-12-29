@@ -1,0 +1,30 @@
+# Grafana Datasources Provisioning
+apiVersion: 1
+
+datasources:
+  # Prometheus datasource for metrics
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+
+  # Wazuh Indexer (Elasticsearch) datasource for logs
+  - name: Wazuh-Indexer
+    type: elasticsearch
+    access: proxy
+    url: http://wazuh-indexer:9200
+    database: "wazuh-alerts-*"
+    isDefault: false
+    editable: false
+    jsonData:
+      esVersion: "7.10.0"
+      timeField: "timestamp"
+      logMessageField: "full_log"
+      logLevelField: "rule.level"
+      maxConcurrentShardRequests: 5
+      interval: "Daily"

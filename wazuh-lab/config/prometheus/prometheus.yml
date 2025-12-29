@@ -1,0 +1,55 @@
+# Prometheus Configuration for Wazuh Lab
+# Collects metrics from Wazuh Indexer and related services
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'wazuh-lab'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # Wazuh Indexer metrics via elasticsearch-exporter
+  - job_name: 'wazuh-indexer'
+    static_configs:
+      - targets: ['indexer-exporter:9114']
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Direct Wazuh Indexer stats (if security is disabled)
+  - job_name: 'wazuh-indexer-direct'
+    static_configs:
+      - targets: ['wazuh-indexer:9200']
+    metrics_path: /_prometheus/metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    # This may fail if the prometheus plugin is not installed
+    honor_labels: true
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'wazuh-indexer'
+
+  # Filebeat metrics
+  - job_name: 'filebeat'
+    static_configs:
+      - targets: ['filebeat:5066']
+    metrics_path: /stats
+    scrape_interval: 30s

@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # Wazuh Indexer (OpenSearch-based)
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:4.9.0
+    container_name: wazuh-indexer
+    hostname: wazuh-indexer
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "plugins.security.disabled=true"
+      - "compatibility.override_main_response_version=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./config/wazuh-indexer/opensearch.yml:/usr/share/wazuh-indexer/opensearch.yml:ro
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - wazuh-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Filebeat - ships logs to Wazuh Indexer
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.18
+    container_name: filebeat
+    hostname: filebeat
+    user: root
+    volumes:
+      - ./config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/var/log/app:ro
+      - filebeat-data:/usr/share/filebeat/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ELASTICSEARCH_HOSTS=http://wazuh-indexer:9200
+      - KIBANA_HOST=http://wazuh-dashboard:5601
+    depends_on:
+      wazuh-indexer:
+        condition: service_healthy
+    networks:
+      - wazuh-net
+    command: filebeat -e -strict.perms=false
+
+  # Log Generator - creates sample logs
+  log-generator:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.log-generator
+    container_name: log-generator
+    hostname: log-generator
+    volumes:
+      - ./logs:/var/log/app
+    networks:
+      - wazuh-net
+    restart: unless-stopped
+
+  # Metrics Exporter - Prometheus metrics for Wazuh Indexer
+  indexer-exporter:
+    image: prometheuscommunity/elasticsearch-exporter:v1.7.0
+    container_name: indexer-exporter
+    hostname: indexer-exporter
+    command:
+      - '--es.uri=http://wazuh-indexer:9200'
+      - '--es.all'
+      - '--es.indices'
+      - '--es.indices_settings'
+      - '--es.indices_mappings'
+      - '--es.shards'
+      - '--es.snapshots'
+    ports:
+      - "9114:9114"
+    depends_on:
+      wazuh-indexer:
+        condition: service_healthy
+    networks:
+      - wazuh-net
+
+  # Prometheus - metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    hostname: prometheus
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - wazuh-net
+
+  # Grafana - visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: grafana
+    hostname: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - wazuh-net
+
+networks:
+  wazuh-net:
+    driver: bridge
+
+volumes:
+  wazuh-indexer-data:
+  filebeat-data:
+  prometheus-data:
+  grafana-data:
