@@ -1,0 +1,21 @@
+{
+  "name": "Wazuh Lab",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "cd wazuh-lab && docker compose up -d",
+  "forwardPorts": [9200, 5601, 55000, 3000, 9090],
+  "portsAttributes": {
+    "9200": {"label": "Wazuh Indexer"},
+    "5601": {"label": "Wazuh Dashboard"},
+    "55000": {"label": "Wazuh API"},
+    "3000": {"label": "Grafana"},
+    "9090": {"label": "Prometheus"}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-azuretools.vscode-docker"]
+    }
+  }
+}
