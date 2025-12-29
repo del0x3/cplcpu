@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Wazuh 4.12.0 All-in-One Lab with Filebeat Speed Measurement
 # Full stack: Manager, Indexer, Dashboard + Filebeat + Monitoring
 
