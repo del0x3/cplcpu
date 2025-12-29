@@ -1,0 +1,32 @@
+# Wazuh Agent 4.12.0 Docker Image
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WAZUH_VERSION=4.12.0-1
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    apt-transport-https \
+    lsb-release \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Wazuh repository
+RUN curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --dearmor -o /usr/share/keyrings/wazuh.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" > /etc/apt/sources.list.d/wazuh.list
+
+# Install Wazuh Agent
+RUN apt-get update && apt-get install -y \
+    wazuh-agent=${WAZUH_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy entrypoint script
+COPY docker-entrypoint-agent.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create log directory
+RUN mkdir -p /var/log/test-logs
+
+ENTRYPOINT ["/entrypoint.sh"]

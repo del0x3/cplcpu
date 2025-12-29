@@ -147,7 +147,9 @@ services:
   # WAZUH AGENT - v4.12.0 with 5GB log generator
   # =============================================================================
   wazuh-agent:
-    image: wazuh/wazuh-agent:4.12.0
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.wazuh-agent
     container_name: wazuh-agent
     hostname: wazuh-agent
     restart: unless-stopped
