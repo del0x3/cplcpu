@@ -130,6 +130,91 @@ curl -s 'http://localhost:9090/api/v1/query?query=(rate(elasticsearch_indices_in
     print(f\"Latency: {float(r[0]['value'][1]):.2f} ms/doc\") if r else print('No data')"
 ```
 
+## Measuring Filebeat Registry & alerts.json Events
+
+Track Filebeat registry reads and new events added to alerts.json:
+
+### Shell Script (Recommended)
+
+```bash
+# Measure registry reads and alerts.json writes
+./scripts/measure_registry_alerts.sh
+
+# Custom duration and interval
+DURATION=120 INTERVAL=5 ./scripts/measure_registry_alerts.sh
+
+# Save results to JSON
+OUTPUT_FILE=./benchmark-results/registry_test.json ./scripts/measure_registry_alerts.sh
+```
+
+**Output:**
+```
+================================================================
+  FILEBEAT REGISTRY & ALERTS.JSON MEASUREMENT
+================================================================
+
+Time  | alerts.json        | Registry           | Indexer            | Lag
+      | Lines   Rate/s     | Offset   Rate/s    | Indexed  Rate/s    | Events
+------|--------------------|--------------------|--------------------|---------
+   2s |    1523     45.50  |   98432    2856.00 |    1498     44.00  |      25
+   4s |    1614     45.50  |  104288    2928.00 |    1589     45.50  |      25
+...
+
+SUMMARY:
+ALERTS.JSON (New Events Written):
+  Total Lines:        1614
+  Avg Write Rate:     45.50 lines/sec
+  Max Write Rate:     48.00 lines/sec
+
+FILEBEAT REGISTRY (File Reads):
+  Current Offset:     104288 bytes
+  Avg Read Rate:      2892.00 bytes/sec
+  Max Read Rate:      3012.00 bytes/sec
+
+INDEXER (Documents Indexed):
+  Total Indexed:      1589
+  Wazuh Alerts:       1589
+  Avg Index Rate:     44.75 docs/sec
+```
+
+### Python Script (Detailed Metrics)
+
+```bash
+# Run Python measurement tool
+python3 ./scripts/measure_filebeat_registry.py
+
+# With custom settings
+DURATION=300 SAMPLE_INTERVAL=5 python3 ./scripts/measure_filebeat_registry.py
+```
+
+### Direct Registry Inspection
+
+```bash
+# View Filebeat registry (from inside container)
+docker exec filebeat cat /usr/share/filebeat/data/registry/filebeat/log.json | \
+    python3 -c "import sys,json; [print(json.dumps(json.loads(l), indent=2)) for l in sys.stdin if l.strip()]"
+
+# Get offset for alerts.json
+docker exec filebeat cat /usr/share/filebeat/data/registry/filebeat/log.json | \
+    grep -i alerts | python3 -c "import sys,json; \
+    [print(f\"File: {json.loads(l).get('v',{}).get('source','')} Offset: {json.loads(l).get('v',{}).get('offset',0)}\") \
+    for l in sys.stdin if l.strip()]"
+
+# Watch alerts.json line count in real-time
+watch -n 1 'wc -l ./logs/alerts/alerts.json'
+```
+
+### Metrics Tracked
+
+| Metric | Description |
+|--------|-------------|
+| **alerts.json Lines** | Total lines/events in the file |
+| **Write Rate** | New lines added per second |
+| **Registry Offset** | Filebeat's current read position (bytes) |
+| **Read Rate** | Bytes read from file per second |
+| **Indexed Count** | Documents indexed in Wazuh Indexer |
+| **Processing Lag** | Events written but not yet indexed |
+
 ## Default Filebeat Configuration
 
 The lab uses the **official Wazuh Filebeat configuration** without modifications:
@@ -266,9 +351,12 @@ wazuh-lab/
 ├── scripts/
 │   ├── log_generator.py                 # High-volume log generator
 │   ├── measure_filebeat_speed.sh        # External speed measurement
+│   ├── measure_registry_alerts.sh       # Registry & alerts.json measurement
+│   ├── measure_filebeat_registry.py     # Python registry monitoring
 │   ├── filebeat_benchmark.py            # Python benchmark tool
 │   └── Dockerfile.*
 └── logs/
+    └── alerts/alerts.json               # Wazuh-style alert events
 ```
 
 ## Troubleshooting
